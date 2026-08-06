@@ -1,0 +1,13 @@
+[repository]
+  name = "hyprstretch"
+  authors = ["Rommmmaha"]
+  commit_pins = [
+    # ["<Hyprland-commit-hash>", "<Plugin-commit-hash>"]
+    ["", ""],
+  ]
+
+[hyprstretch]
+  description = "Resize windows without changing their resolution"
+  authors = ["Rommmmaha"]
+  output = "hyprstretch/hyprstretch.so"
+  build = ["make -C hyprstretch"]
