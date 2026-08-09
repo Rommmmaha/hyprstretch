@@ -25,11 +25,15 @@ extern "C" {
 using FnPointerMotion = void (*)(CSeatManager*, uint32_t, const Vector2D&);
 using FnXWaylandConfigure = void (*)(CXWaylandSurface*, const CBox&);
 using FnXDGToplevelSetSize = uint32_t (*)(CXDGToplevelResource*, const Vector2D&);
+using FnXDGToplevelLayoutMinSize = Vector2D (*)(CXDGToplevelResource*);
+using FnWindowMinSize = std::optional<Vector2D> (*)(Desktop::View::CWindow*);
 using FnCalculateUVForSurface = void (*)(Render::IElementRenderer*, PHLWINDOW, SP<CWLSurfaceResource>, PHLMONITOR, bool, const Vector2D&, const Vector2D&, bool);
 using FnWLSurfaceComputeDamage = CRegion (*)(Desktop::View::CWLSurface*);
 inline CFunctionHook* g_pPointerMotionHook = nullptr;
 inline CFunctionHook* g_pXWaylandConfigureHook = nullptr;
 inline CFunctionHook* g_pXDGToplevelSetSizeHook = nullptr;
+inline CFunctionHook* g_pXDGToplevelLayoutMinSizeHook = nullptr;
+inline CFunctionHook* g_pWindowMinSizeHook = nullptr;
 inline CFunctionHook* g_pCalculateUVHook = nullptr;
 inline CFunctionHook* g_pWLSurfaceComputeDamageHook = nullptr;
 struct SAppConfig {
@@ -116,6 +120,20 @@ uint32_t hkXDGToplevelSetSize(CXDGToplevelResource* toplevel, const Vector2D& si
   }
   return callOriginal<FnXDGToplevelSetSize>(g_pXDGToplevelSetSizeHook, toplevel, newSize);
 }
+Vector2D hkXDGToplevelLayoutMinSize(CXDGToplevelResource* toplevel) {
+  if (toplevel) {
+    if (const auto window = toplevel->m_window.get()) {
+      if (isActive(window, window->m_initialClass))
+        return Vector2D{64, 64};
+    }
+  }
+  return callOriginal<FnXDGToplevelLayoutMinSize>(g_pXDGToplevelLayoutMinSizeHook, toplevel);
+}
+std::optional<Vector2D> hkWindowMinSize(Desktop::View::CWindow* window) {
+  if (window && isActive(window, window->m_initialClass))
+    return Vector2D{64, 64};
+  return callOriginal<FnWindowMinSize>(g_pWindowMinSizeHook, window);
+}
 void hkCalculateUVForSurface(Render::IElementRenderer* renderer, PHLWINDOW window, SP<CWLSurfaceResource> surface, PHLMONITOR monitor, bool main, const Vector2D& projSize, const Vector2D& projSizeUnscaled, bool fixMisalignedFSV1) {
   if (window && isActive(window.get(), window->m_initialClass)) {
     g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft = Vector2D(-1, -1);
@@ -157,6 +175,10 @@ static bool toggleFocusedWindow() {
   if (isOn) {
     if (!g_enabledWindows.erase(window.get()))
       g_disabledWindows.insert(window.get());
+    if (window->m_isFloating) {
+      if (const auto MINSIZE = window->minSize(); MINSIZE)
+        window->clampWindowSize(MINSIZE, std::nullopt);
+    }
     refreshWindowSize(window.get());
   } else {
     if (!g_disabledWindows.erase(window.get()))
@@ -252,12 +274,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
   g_pPointerMotionHook = createHook("sendPointerMotion", "CSeatManager", (void*)::hkSendPointerMotion);
   g_pXWaylandConfigureHook = createHook("configure", "XWaylandSurface", (void*)::hkXWaylandConfigure);
   g_pXDGToplevelSetSizeHook = createHook("setSize", "CXDGToplevelResource", (void*)::hkXDGToplevelSetSize);
+  g_pXDGToplevelLayoutMinSizeHook = createHook("layoutMinSize", "CXDGToplevelResource", (void*)::hkXDGToplevelLayoutMinSize);
+  g_pWindowMinSizeHook = createHook("minSize", "CWindow::minSize", (void*)::hkWindowMinSize);
   g_pCalculateUVHook = createHook("calculateUVForSurface", "IElementRenderer", (void*)::hkCalculateUVForSurface);
   g_pWLSurfaceComputeDamageHook = createHook("computeDamage", "CWLSurface", (void*)::hkWLSurfaceComputeDamage);
-  const std::array<CFunctionHook*, 5> hooks = {
+  const std::array<CFunctionHook*, 7> hooks = {
       g_pPointerMotionHook,
       g_pXWaylandConfigureHook,
       g_pXDGToplevelSetSizeHook,
+      g_pXDGToplevelLayoutMinSizeHook,
+      g_pWindowMinSizeHook,
       g_pCalculateUVHook,
       g_pWLSurfaceComputeDamageHook};
   for (auto hook : hooks) {
